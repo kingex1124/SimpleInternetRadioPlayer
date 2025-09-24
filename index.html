@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>簡易網路電台播放器</title>
+<style>
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; padding: 24px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .row { margin: 12px 0; }
+  button { font-size: 16px; padding: 8px 14px; margin-right: 8px; }
+  #log { margin-top: 10px; padding: 10px; background: #f5f5f5; height: 140px; overflow: auto; font: 12px/1.4 Menlo, Consolas, monospace; white-space: pre-wrap; }
+  .hint { color: #666; font-size: 13px; }
+</style>
+
+<h1>Baroque Stream 播放器</h1>
+<div class="hint">若無聲音：先點一次「播放」。若出現 NETWORK 或 SRC_NOT_SUPPORTED，表示舊系統的 TLS 可能不支援該站的 HTTPS。</div>
+
+<div class="row">
+  <button id="btnPlay">▶ 播放</button>
+  <button id="btnPause">⏸ 暫停</button>
+  <button id="btnStop">■ 停止</button>
+  <label>
+    音量
+    <input id="vol" type="range" min="0" max="1" step="0.01" value="1" style="vertical-align: middle;">
+  </label>
+</div>
+
+<!-- 也保留原生控制列，舊瀏覽器更穩定 -->
+<audio id="player" controls preload="none"></audio>
+
+<div id="log"></div>
+
+<script>
+// 注意：為了相容 Chrome 49，這裡全部使用 ES5 寫法（不用 let/const、箭頭函式）。
+(function () {
+  // 你的串流網址（可改）
+  var STREAM_URL = "https://strm112.1.fm/baroque_mobile_mp3?aw_0_req.gdpr=true";
+
+  var audio = document.getElementById('player');
+  var btnPlay = document.getElementById('btnPlay');
+  var btnPause = document.getElementById('btnPause');
+  var btnStop = document.getElementById('btnStop');
+  var vol = document.getElementById('vol');
+  var logBox = document.getElementById('log');
+
+  // 指定音源與型別（type 有助於舊版瀏覽器判斷）
+  // 也可以用 <source>，但直接設 src 在舊版更直覺
+  audio.src = STREAM_URL; // MP3 直串流
+  audio.preload = "none"; // 等使用者按下播放再開流
+
+  function log(msg) {
+    logBox.innerHTML += msg + "\n";
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  // 事件監聽（協助排錯）
+  audio.addEventListener('play', function () { log("event: play"); });
+  audio.addEventListener('playing', function () { log("event: playing"); });
+  audio.addEventListener('pause', function () { log("event: pause"); });
+  audio.addEventListener('waiting', function () { log("event: waiting (buffering)"); });
+  audio.addEventListener('stalled', function () { log("event: stalled"); });
+  audio.addEventListener('canplay', function () { log("event: canplay"); });
+  audio.addEventListener('canplaythrough', function () { log("event: canplaythrough"); });
+  audio.addEventListener('error', function () {
+    var code = audio.error && audio.error.code;
+    var map = {1:"ABORTED", 2:"NETWORK", 3:"DECODE", 4:"SRC_NOT_SUPPORTED"};
+    log("event: error code=" + code + " (" + (map[code] || "unknown") + ")");
+  });
+
+  // 控制
+  btnPlay.onclick = function () {
+    try { audio.play(); } catch (e) { log("play() rejected: " + e.message); }
+  };
+  btnPause.onclick = function () { audio.pause(); };
+  btnStop.onclick = function () {
+    try {
+      audio.pause();
+      // 釋放連線（對部分瀏覽器較有用）
+      audio.removeAttribute('src');
+      audio.load();
+      // 重設，方便再次播放
+      audio.src = STREAM_URL;
+      log("stopped and reset");
+    } catch (e) { log("stop error: " + e.message); }
+  };
+  vol.oninput = function () { audio.volume = parseFloat(vol.value || "1"); };
+
+  // 某些舊站會檢查是否有使用者手勢；這裡保留手動按鈕即可
+})();
+</script>
