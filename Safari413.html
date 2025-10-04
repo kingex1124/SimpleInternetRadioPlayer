@@ -1,0 +1,191 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>簡易網路電台播放器（適配 Safari 4.1.3 / macOS 10.4.11）</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; padding: 18px; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .row { margin: 10px 0; }
+  button { font-size: 14px; padding: 6px 10px; margin-right: 6px; }
+  input[type="text"] { width: 98%; max-width: 720px; padding: 6px; font-size: 13px; }
+  #log { margin-top: 8px; padding: 8px; background: #f4f4f4; height: 140px; overflow: auto; font: 12px/1.4 Menlo, Monaco, monospace; white-space: pre-wrap; border: 1px solid #ddd; }
+  .hint { color: #555; font-size: 12px; }
+  .hide { display: none; }
+</style>
+
+<h1>Baroque Stream 播放器（超舊版相容）</h1>
+<div class="hint">
+  先按「播放」。若出現 NETWORK / SRC_NOT_SUPPORTED，多半是舊系統不支援該 HTTPS 憑證或加密套件，請改 <b>HTTP 串流</b>。
+  也可在網址後面加 <code>?url=...</code> 指定新串流位址。
+</div>
+
+<div class="row">
+  <div>串流網址：</div>
+  <input id="url" type="text"
+         value="https://strm112.1.fm/baroque_mobile_mp3?aw_0_req.gdpr=true">
+</div>
+
+<div class="row">
+  <button id="btnPlay">▶ 播放</button>
+  <button id="btnPause">⏸ 暫停</button>
+  <button id="btnStop">■ 停止</button>
+  <button id="volDown">🔉 音量 -</button>
+  <button id="volUp">🔊 音量 +</button>
+</div>
+
+<!-- 主要播放：HTML5 audio（若可用） -->
+<audio id="player" class="hide" controls preload="none"></audio>
+
+<!-- 後備播放：QuickTime 外掛（HTML5 失敗時動態生成） -->
+<div id="qtWrap" class="hide"></div>
+
+<div id="log"></div>
+
+<script>
+// 全用 ES3/DOM2 寫法以相容 Safari 4.1.3（無 let/const/箭頭函式/JSON 解析器等新特性）
+(function () {
+  var inputUrl = document.getElementById('url');
+  var audio = document.getElementById('player');
+  var qtWrap = document.getElementById('qtWrap');
+  var logBox = document.getElementById('log');
+  var btnPlay = document.getElementById('btnPlay');
+  var btnPause = document.getElementById('btnPause');
+  var btnStop = document.getElementById('btnStop');
+  var btnVolDown = document.getElementById('volDown');
+  var btnVolUp = document.getElementById('volUp');
+
+  // 解析 ?url=...（Safari 4 無 URLSearchParams）
+  var q = window.location.search || "";
+  var urlParam = (function (s) {
+    if (!s || s.length < 2) return "";
+    s = s.substring(1);
+    var parts = s.split("&");
+    for (var i = 0; i < parts.length; i++) {
+      var kv = parts[i].split("=");
+      if (kv[0] === "url") {
+        try { return decodeURIComponent(kv[1].replace(/\+/g, " ")); } catch (e) { return kv[1]; }
+      }
+    }
+    return "";
+  })(q);
+  if (urlParam) inputUrl.value = urlParam;
+
+  function log(msg) {
+    logBox.innerHTML += msg + "\n";
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function show(el) { el.className = el.className.replace(/\bhide\b/, ""); }
+  function hide(el) { if (el.className.indexOf("hide") < 0) el.className += " hide"; }
+
+  function canPlayMP3() {
+    var test = document.createElement('audio');
+    return !!(test && test.canPlayType && test.canPlayType('audio/mpeg'));
+  }
+
+  // 初始化：若支援 <audio> 播 MP3，先用 HTML5；否則待會直接 fallback
+  var html5Capable = canPlayMP3();
+  if (html5Capable) {
+    show(audio);
+    audio.preload = "none";
+
+    // 設定事件（協助排錯）
+    if (audio.addEventListener) {
+      audio.addEventListener('play', function(){ log('audio: play'); }, false);
+      audio.addEventListener('playing', function(){ log('audio: playing'); }, false);
+      audio.addEventListener('pause', function(){ log('audio: pause'); }, false);
+      audio.addEventListener('waiting', function(){ log('audio: waiting (buffering)'); }, false);
+      audio.addEventListener('stalled', function(){ log('audio: stalled'); }, false);
+      audio.addEventListener('canplay', function(){ log('audio: canplay'); }, false);
+      audio.addEventListener('canplaythrough', function(){ log('audio: canplaythrough'); }, false);
+      audio.addEventListener('error', function(){
+        var code = audio.error && audio.error.code;
+        var map = {1:"ABORTED",2:"NETWORK",3:"DECODE",4:"SRC_NOT_SUPPORTED"};
+        log('audio: error code=' + code + ' (' + (map[code] || 'unknown') + ')  → 使用 QuickTime 外掛後備');
+        fallbackToQuickTime(inputUrl.value);
+      }, false);
+    }
+  }
+
+  function fallbackToQuickTime(u) {
+    hide(audio);
+    var html = ''
+      + '<object type="audio/mpeg" data="' + u + '" width="320" height="18">'
+      +   '<param name="src" value="' + u + '"/>'
+      +   '<param name="autoplay" value="true"/>'
+      +   '<param name="controller" value="true"/>'
+      +   '<embed src="' + u + '" type="audio/mpeg" autoplay="true" controller="true" width="320" height="18"></embed>'
+      + '</object>';
+    qtWrap.innerHTML = html;
+    show(qtWrap);
+    log('fallback: QuickTime plugin mode（若 HTTPS 仍失敗，請改 HTTP 串流）');
+  }
+
+  function startPlay() {
+    var u = inputUrl.value || "";
+    if (!u) { log("請輸入串流網址"); return; }
+
+    // 先用 HTML5 試播；不行再 fallback
+    if (html5Capable) {
+      try {
+        hide(qtWrap);
+        audio.pause && audio.pause();
+        audio.removeAttribute && audio.removeAttribute('src');
+        audio.load && audio.load();
+        audio.src = u;
+        // Safari 4 對 play() 的 Promise 不支援，直接呼叫即可
+        audio.play && audio.play();
+        log("audio: play() 已呼叫");
+      } catch (e) {
+        log("audio: play() 例外 → 使用 QuickTime 外掛；訊息：" + e);
+        fallbackToQuickTime(u);
+      }
+    } else {
+      fallbackToQuickTime(u);
+    }
+  }
+
+  function pausePlay() {
+    if (html5Capable && audio && audio.pause) {
+      try { audio.pause(); } catch (e) {}
+    } else {
+      log("外掛模式請用外掛控制列暫停/播放");
+    }
+  }
+
+  function stopPlay() {
+    if (html5Capable && audio) {
+      try {
+        audio.pause && audio.pause();
+        audio.removeAttribute && audio.removeAttribute('src');
+        audio.load && audio.load();
+        log("audio: 已停止並重置");
+      } catch (e) { log("stop error: " + e); }
+    } else {
+      // 外掛：移除再重建（等下次播放時建立）
+      qtWrap.innerHTML = "";
+      hide(qtWrap);
+      log("外掛：已移除。按『播放』會重新建立外掛。");
+    }
+  }
+
+  btnPlay.onclick = startPlay;
+  btnPause.onclick = pausePlay;
+  btnStop.onclick = stopPlay;
+
+  // 簡易音量（只對 HTML5 audio 有效；外掛請用系統/外掛控制）
+  btnVolDown.onclick = function () {
+    if (html5Capable && audio && typeof audio.volume === "number") {
+      var v = audio.volume - 0.1; if (v < 0) v = 0;
+      audio.volume = v;
+      log("音量：" + (Math.round(v * 100)) + "%");
+    }
+  };
+  btnVolUp.onclick = function () {
+    if (html5Capable && audio && typeof audio.volume === "number") {
+      var v = audio.volume + 0.1; if (v > 1) v = 1;
+      audio.volume = v;
+      log("音量：" + (Math.round(v * 100)) + "%");
+    }
+  };
+})();
+</script>
